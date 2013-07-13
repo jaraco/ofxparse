@@ -14,6 +14,11 @@ def soup_maker(fh):
         from BeautifulSoup import BeautifulStoneSoup
         return BeautifulStoneSoup(fh)
 
+def parse_decimal(arg):
+    if hasattr(arg, "replace"):
+        # replace 10,02 to 10.02 for decimal.Decimal
+        arg = arg.replace(",", ".")
+    return decimal.Decimal(arg)
 
 class OfxFile(object):
     def __init__(self, fh):
@@ -222,8 +227,8 @@ class InvestmentTransaction(object):
         self.tradeDate = None
         self.settleDate = None
         self.security = ''
-        self.units = decimal.Decimal(0)
-        self.unit_price = decimal.Decimal(0)
+        self.units = parse_decimal(0)
+        self.unit_price = parse_decimal(0)
 
     def __repr__(self):
         return "<InvestmentTransaction type=" + str(self.type) + ", units=" + str(self.units) + ">"
@@ -232,8 +237,8 @@ class InvestmentTransaction(object):
 class Position(object):
     def __init__(self):
         self.security = ''
-        self.units = decimal.Decimal(0)
-        self.unit_price = decimal.Decimal(0)
+        self.units = parse_decimal(0)
+        self.unit_price = parse_decimal(0)
 
 
 class Institution(object):
@@ -423,10 +428,10 @@ class OfxParser(object):
             position.security = tag.contents[0].strip()
         tag = ofx.find('units')
         if (hasattr(tag, 'contents')):
-            position.units = decimal.Decimal(tag.contents[0].strip())
+            position.units = parse_decimal(tag.contents[0].strip())
         tag = ofx.find('unitprice')
         if (hasattr(tag, 'contents')):
-            position.unit_price = decimal.Decimal(tag.contents[0].strip())
+            position.unit_price = parse_decimal(tag.contents[0].strip())
         tag = ofx.find('dtpriceasof')
         if (hasattr(tag, 'contents')):
             try:
@@ -463,10 +468,10 @@ class OfxParser(object):
             transaction.security = tag.contents[0].strip()
         tag = ofx.find('units')
         if (hasattr(tag, 'contents')):
-            transaction.units = decimal.Decimal(tag.contents[0].strip())
+            transaction.units = parse_decimal(tag.contents[0].strip())
         tag = ofx.find('unitprice')
         if (hasattr(tag, 'contents')):
-            transaction.unit_price = decimal.Decimal(tag.contents[0].strip())
+            transaction.unit_price = parse_decimal(tag.contents[0].strip())
         return transaction
 
     @classmethod
@@ -642,7 +647,7 @@ class OfxParser(object):
             balamt_tag = ledger_bal_tag.find('balamt')
             if hasattr(balamt_tag, "contents"):
                 try:
-                    statement.balance = decimal.Decimal(
+                    statement.balance = parse_decimal(
                         balamt_tag.contents[0].strip())
                 except (IndexError, decimal.InvalidOperation), ex:
                     statement.warnings.append(
@@ -655,7 +660,7 @@ class OfxParser(object):
             balamt_tag = avail_bal_tag.find('balamt')
             if hasattr(balamt_tag, "contents"):
                 try:
-                    statement.available_balance = decimal.Decimal(
+                    statement.available_balance = parse_decimal(
                         balamt_tag.contents[0].strip())
                 except (IndexError, decimal.InvalidOperation), ex:
                     statement.warnings.append(u"Available balance amount was"
@@ -715,7 +720,7 @@ class OfxParser(object):
         amt_tag = txn_ofx.find('trnamt')
         if hasattr(amt_tag, "contents"):
             try:
-                transaction.amount = decimal.Decimal(
+                transaction.amount = parse_decimal(
                     amt_tag.contents[0].strip())
             except IndexError:
                 raise OfxParserException("Invalid Transaction Date")

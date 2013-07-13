@@ -202,6 +202,18 @@ NEWFILEUID:NONE
         ofx_file = OfxFile(fh)
         self.assertEquals(len(ofx_file.headers.keys()), 2)
 
+    def testDecimalParsingWithCommas(self):
+        # open files
+        ofx_standard = OfxParser.parse(open_file('bank_medium.ofx'))
+        ofx_w_commas = OfxParser.parse(open_file('bank_medium_with_commas.ofx'))
+
+        # extract transactions
+        t1 = list(t.amount for t in ofx_standard.account.statement.transactions)
+        t2 = list(t.amount for t in ofx_w_commas.account.statement.transactions)
+
+        # compare
+        self.assertEquals(t1, t2)
+
 
 class TestParse(TestCase):
     def testEmptyFile(self):
