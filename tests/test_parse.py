@@ -177,6 +177,28 @@ NEWFILEUID:NONE
             self.assertTrue(type(key) is unicode)
             self.assertTrue(type(value) is not str)
 
+    def testForceEncoding(self):
+        fh = StringIO("""OFXHEADER:100
+DATA:OFXSGML
+VERSION:102
+SECURITY:NONE
+ENCODING:USASCII
+CHARSET:1252
+COMPRESSION:NONE
+OLDFILEUID:NONE
+NEWFILEUID:NONE
+""")
+        ofx_file = OfxFile(fh, encoding='cp1250')
+        headers = ofx_file.headers
+        result = ofx_file.fh.read()
+
+        self.assertTrue(type(result) is unicode)
+        for key, value in headers.iteritems():
+            self.assertTrue(type(key) is unicode)
+            self.assertTrue(type(value) is not str)
+
+        self.assertEquals(ofx_file.encoding, 'cp1250')
+
     def testUTF8Japanese(self):
         fh = StringIO("""OFXHEADER:100
 DATA:OFXSGML
