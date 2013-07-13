@@ -19,6 +19,15 @@ else:
         "beautifulsoup4"
     ]
 
+if sys.version_info < (2,7):
+    REQUIRES.extend([
+        "ordereddict>=1.1",
+    ])
+
+REQUIRES.extend([
+    'six',
+])
+
 setup_params = dict(
     name='ofxparse',
     version=VERSION,
@@ -31,7 +40,6 @@ setup_params = dict(
         "Intended Audience :: Developers",
         "Natural Language :: English",
         "Operating System :: OS Independent",
-        "Programming Language :: Python :: 2.4",
         "Programming Language :: Python :: 2.5",
         "Programming Language :: Python :: 2.6",
         "Programming Language :: Python :: 2.7",
@@ -51,7 +59,6 @@ setup_params = dict(
     install_requires=REQUIRES,
     entry_points="""
     """,
-    use_2to3=True,
     test_suite='tests',
     )
 
