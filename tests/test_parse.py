@@ -1,17 +1,17 @@
 from __future__ import absolute_import
 
-from ofxparse.ofxparse import soup_maker
+import os
 from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest import TestCase
 import sys
-sys.path.append('..')
+sys.path.insert(0, os.path.abspath('..'))
 
 import six
 
 from .support import open_file
 from ofxparse import OfxParser, AccountType, Account, Statement, Transaction
-from ofxparse.ofxparse import OfxFile, OfxPreprocessedFile, OfxParserException
+from ofxparse.ofxparse import OfxFile, OfxPreprocessedFile, OfxParserException, soup_maker
 
 class TestOfxPreprocessedFile(TestCase):
 
@@ -253,7 +253,7 @@ class TestParse(TestCase):
 
     def testThatParseFailsIfAPathIsPassedIn(self):
         # A file handle should be passed in, not the path.
-        self.assertRaises(RuntimeError, OfxParser.parse, '/foo/bar')
+        self.assertRaises(TypeError, OfxParser.parse, '/foo/bar')
 
     def testThatParseReturnsAResultWithABankAccount(self):
         ofx = OfxParser.parse(open_file('bank_medium.ofx'))
@@ -266,11 +266,15 @@ class TestParse(TestCase):
         self.assertEquals('00', ofx.account.branch_id)
         self.assertEquals('CHECKING', ofx.account.account_type)
         self.assertEquals(Decimal('382.34'), ofx.account.statement.balance)
+        self.assertEquals(datetime(2009, 5, 23, 12, 20, 17), 
+                          ofx.account.statement.balance_date)
         # Todo: support values in decimal or int form.
         # self.assertEquals('15',
         # ofx.bank_account.statement.balance_in_pennies)
         self.assertEquals(
             Decimal('682.34'), ofx.account.statement.available_balance)
+        self.assertEquals(datetime(2009, 5, 23, 12, 20, 17),
+            ofx.account.statement.available_balance_date)
         self.assertEquals(
             datetime(2009, 4, 1), ofx.account.statement.start_date)
         self.assertEquals(
@@ -421,7 +425,9 @@ class TestParseStatement(TestCase):
             datetime(2009, 5, 23, 12, 20, 17), statement.end_date)
         self.assertEquals(1, len(statement.transactions))
         self.assertEquals(Decimal('382.34'), statement.balance)
+        self.assertEquals(datetime(2009, 5, 23, 12, 20, 17), statement.balance_date)
         self.assertEquals(Decimal('682.34'), statement.available_balance)
+        self.assertEquals(datetime(2009, 5, 23, 12, 20, 17), statement.available_balance_date)
 
 
 class TestStatement(TestCase):
@@ -542,6 +548,22 @@ class TestFidelityInvestmentStatement(TestCase):
     def testSecurityListSuccess(self):
         ofx = OfxParser.parse(open_file('fidelity.ofx'))
         self.assertEquals(len(ofx.security_list), 7)
+
+
+class TestSuncorpBankStatement(TestCase):
+    def testCDATATransactions(self):
+        ofx = OfxParser.parse(open_file('suncorp.ofx'))
+        accounts = ofx.accounts
+        self.assertEquals(len(accounts), 1)
+        account = accounts[0]
+        transactions = account.statement.transactions
+        self.assertEquals(len(transactions), 1)
+        transaction = transactions[0]
+        self.assertEquals(transaction.payee, "EFTPOS WDL HANDYWAY ALDI STORE")
+        self.assertEquals(
+            transaction.memo,
+            "EFTPOS WDL HANDYWAY ALDI STORE   GEELONG WEST VICAU")
+        self.assertEquals(transaction.amount, Decimal("-16.85"))
 
 
 class TestAccountInfoAggregation(TestCase):

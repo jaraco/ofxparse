@@ -22,13 +22,37 @@ else:
 
 from . import mcc
 
+
+def skip_headers(fh):
+    '''
+    Prepare `fh` for parsing by BeautifulSoup by skipping its OFX
+    headers.
+    '''
+    if fh is None or isinstance(fh, six.string_types):
+        return
+    fh.seek(0)
+    header_re = re.compile(r"^\s*\w+:\s*\w+\s*$")
+    while True:
+        pos = fh.tell()
+        line = fh.readline()
+        if not line:
+            break
+        if header_re.search(line) is None:
+            fh.seek(pos)
+            return
+
+
 def soup_maker(fh):
+    skip_headers(fh)
     try:
         from bs4 import BeautifulSoup
-        return BeautifulSoup(fh)
+        soup = BeautifulSoup(fh, "xml")
+        for tag in soup.findAll():
+            tag.name = tag.name.lower()
     except ImportError:
         from BeautifulSoup import BeautifulStoneSoup
-        return BeautifulStoneSoup(fh)
+        soup = BeautifulStoneSoup(fh)
+    return soup
 
 def parse_decimal(arg):
     if hasattr(arg, "replace"):
@@ -194,6 +218,7 @@ class AccountType(object):
 
 class Account(object):
     def __init__(self):
+        self.curdef = None
         self.statement = None
         self.account_id = ''
         self.routing_number = ''
@@ -224,11 +249,18 @@ class Security:
         self.memo = memo
 
 class Signon:
-    def __init__(self, code, severity, message):
-        self.code = code
-        self.severity = severity
-        self.message = message
-        if int(code) == 0:
+    def __init__(self, keys):
+        self.code = keys['code']
+        self.severity = keys['severity']
+        self.message = keys['message']
+        self.dtserver = keys['dtserver']
+        self.language = keys['language']
+        self.dtprofup = keys['dtprofup']
+        self.fi_org = keys['org']
+        self.fi_fid = keys['fid']
+        self.intu_bid = keys['intu.bid']
+
+        if int(self.code) == 0:
             self.success = True
         else:
             self.success = False
@@ -239,7 +271,24 @@ class Signon:
         ret += "\t\t\t\t<SEVERITY>%s\r\n" % self.severity
         if self.message:
             ret += "\t\t\t\t<MESSAGE>%s\r\n" % self.message
-        ret += "\t\t\t</STATUS>\r\n" + "\t\t</SONRS>\r\n" + "\t</SIGNONMSGSRSV1>\r\n"
+        ret += "\t\t\t</STATUS>\r\n"
+        if self.dtserver is not None:
+            ret += "\t\t\t<DTSERVER>" + self.dtserver + "\r\n"
+        if self.language is not None:
+            ret += "\t\t\t<LANGUAGE>" + self.language + "\r\n"
+        if self.dtprofup is not None:
+            ret += "\t\t\t<DTPROFUP>" + self.dtprofup + "\r\n"
+        if (self.fi_org is not None) or (self.fi_fid is not None):
+            ret += "\t\t\t<FI>\r\n"
+            if self.fi_org is not None:
+                ret += "\t\t\t\t<ORG>" + self.fi_org + "\r\n"
+            if self.fi_fid is not None:
+                ret += "\t\t\t\t<FID>" + self.fi_fid + "\r\n"
+            ret += "\t\t\t</FI>\r\n"
+        if self.intu_bid is not None:
+            ret += "\t\t\t<INTU.BID>" + self.intu_bid + "\r\n"
+        ret += "\t\t</SONRS>\r\n" 
+        ret += "\t</SIGNONMSGSRSV1>\r\n"
         return ret
 
 class Statement(object):
@@ -279,17 +328,22 @@ class Transaction(object):
 
 
 class InvestmentTransaction(object):
-    (Unknown, BuyMF, SellMF, Reinvest, BuyStock, SellStock) = [x for x in range(-1, 5)]
+    (Unknown, BuyMF, SellMF, Reinvest, BuyStock, SellStock, Income) = [x for x in range(-1, 6)]
     def __init__(self, type):
         try:
-            self.type = ['buymf', 'sellmf', 'reinvest', 'buystock', 'sellstock'].index(type.lower())
+            self.type = ['buymf', 'sellmf', 'reinvest', 'buystock', 'sellstock', 'income'].index(type.lower())
         except ValueError:
             self.type = InvestmentTransaction.Unknown
         self.tradeDate = None
         self.settleDate = None
+        self.memo = ''
         self.security = ''
+        self.income_type = ''
         self.units = parse_decimal(0)
         self.unit_price = parse_decimal(0)
+        self.commission = parse_decimal(0)
+        self.fees = parse_decimal(0)
+        self.total = parse_decimal(0)
 
     def __repr__(self):
         return "<InvestmentTransaction type=" + str(self.type) + ", units=" + str(self.units) + ">"
@@ -329,8 +383,9 @@ class OfxParser(object):
         '''
         cls_.fail_fast = fail_fast
 
-        if isinstance(file_handle, type('')):
-            raise RuntimeError(six.u("parse() takes in a file handle, not a string"))
+        if not hasattr(file_handle, 'seek'):
+            raise TypeError(six.u('parse() accepts a seek-able file handle, not %s'
+                    % type(file_handle).__name__))
 
         ofx_obj = Ofx()
 
@@ -340,13 +395,29 @@ class OfxParser(object):
         ofx_obj.accounts = []
         ofx_obj.signon = None
 
+        skip_headers(ofx_file.fh)
         ofx = soup_maker(ofx_file.fh)
-        if len(ofx.contents) == 0:
+        if ofx.find('ofx') is None:
             raise OfxParserException('The ofx file is empty!')
 
         sonrs_ofx = ofx.find('sonrs')
         if sonrs_ofx:
             ofx_obj.signon = cls_.parseSonrs(sonrs_ofx)
+
+        stmttrnrs = ofx.find('stmttrnrs')
+        if stmttrnrs:
+            stmttrnrs_trnuid = stmttrnrs.find('trnuid')
+            if stmttrnrs_trnuid:
+                ofx_obj.trnuid = stmttrnrs_trnuid.contents[0].strip()
+
+            stmttrnrs_status = stmttrnrs.find('status')
+            if stmttrnrs_status:
+                ofx_obj.status = {}
+                ofx_obj.status['code'] = int(
+                    stmttrnrs_status.find('code').contents[0].strip()
+                )
+                ofx_obj.status['severity'] = \
+                    stmttrnrs_status.find('severity').contents[0].strip()
 
         stmtrs_ofx = ofx.findAll('stmtrs')
         if stmtrs_ofx:
@@ -394,14 +465,20 @@ class OfxParser(object):
 
         timeZoneOffset = datetime.timedelta(hours=tz)
 
+        res = re.search("^[0-9]*\.([0-9]{0,5})", ofxDateTime)
+        if res:
+            msec = datetime.timedelta(seconds=float("0." + res.group(1)))
+        else:
+            msec = datetime.timedelta(seconds=0)
+
         try:
             local_date = datetime.datetime.strptime(
                 ofxDateTime[:14], '%Y%m%d%H%M%S'
             )
-            return local_date - timeZoneOffset
+            return local_date - timeZoneOffset + msec
         except:
             return datetime.datetime.strptime(
-                ofxDateTime[:8], '%Y%m%d') - timeZoneOffset
+                ofxDateTime[:8], '%Y%m%d') - timeZoneOffset + msec
 
     @classmethod
     def parseAcctinfors(cls_, acctinfors_ofx, ofx):
@@ -470,7 +547,12 @@ class OfxParser(object):
             name_tag = secinfo_ofx.find('secname')
             ticker_tag = secinfo_ofx.find('ticker')
             memo_tag = secinfo_ofx.find('memo')
-            if uniqueid_tag and name_tag and ticker_tag:
+            if uniqueid_tag and name_tag:
+                try:
+                    ticker = ticker_tag.contents[0].strip()
+                except AttributeError:
+                    # ticker can be empty
+                    ticker = None
                 try:
                     memo = memo_tag.contents[0].strip()
                 except AttributeError:
@@ -479,7 +561,7 @@ class OfxParser(object):
                 securityList.append(
                     Security(uniqueid_tag.contents[0].strip(),
                              name_tag.contents[0].strip(),
-                             ticker_tag.contents[0].strip(),
+                             ticker,
                              memo))
         return securityList
 
@@ -529,12 +611,24 @@ class OfxParser(object):
         tag = ofx.find('uniqueid')
         if (hasattr(tag, 'contents')):
             transaction.security = tag.contents[0].strip()
+        tag = ofx.find('incometype')
+        if (hasattr(tag, 'contents')):
+            transaction.income_type = tag.contents[0].strip()
         tag = ofx.find('units')
         if (hasattr(tag, 'contents')):
             transaction.units = parse_decimal(tag.contents[0].strip())
         tag = ofx.find('unitprice')
         if (hasattr(tag, 'contents')):
             transaction.unit_price = parse_decimal(tag.contents[0].strip())
+        tag = ofx.find('commission')
+        if (hasattr(tag, 'contents')):
+            transaction.commission = parse_decimal(tag.contents[0].strip())
+        tag = ofx.find('fees')
+        if (hasattr(tag, 'contents')):
+            transaction.fees = parse_decimal(tag.contents[0].strip())
+        tag = ofx.find('total')
+        if (hasattr(tag, 'contents')):
+            transaction.total = parse_decimal(tag.contents[0].strip())
         return transaction
 
     @classmethod
@@ -589,7 +683,7 @@ class OfxParser(object):
                 )
 
         for transaction_type in ['buymf', 'sellmf', 'reinvest', 'buystock',
-                                 'sellstock', 'buyopt', 'sellopt']:
+                                 'sellstock', 'income', 'buyopt', 'sellopt']:
             try:
                 for investment_ofx in invstmtrs_ofx.findAll(transaction_type):
                     statement.transactions.append(
@@ -621,14 +715,28 @@ class OfxParser(object):
     @classmethod
     def parseSonrs(cls_, sonrs):
 
-        code     = int(sonrs.find('code').contents[0].strip())
-        severity = sonrs.find('severity').contents[0].strip()
-        try:
-            message = sonrs.find('message').contents[0].strip()
-        except:
-            message = ''
+        items = [
+            'code',
+            'severity',
+            'dtserver',
+            'language',
+            'dtprofup',
+            'org',
+            'fid',
+            'intu.bid',
+            'message'
+        ]
+        idict = {}
+        for i in items:
+            try:
+                idict[i] = sonrs.find(i).contents[0].strip()
+            except:
+                idict[i] = None
+        idict['code'] = int(idict['code'])
+        if idict['message'] is None:
+            idict['message'] = ''
 
-        return Signon(code,severity,message)
+        return Signon(idict)
 
     @classmethod
     def parseStmtrs(cls_, stmtrs_list, accountType):
@@ -636,6 +744,9 @@ class OfxParser(object):
         ret = []
         for stmtrs_ofx in stmtrs_list:
             account = Account()
+            act_curdef = stmtrs_ofx.find('curdef')
+            if act_curdef:
+                account.curdef = act_curdef.contents[0].strip()
             acctid_tag = stmtrs_ofx.find('acctid')
             if hasattr(acctid_tag, 'contents'):
                 account.account_id = acctid_tag.contents[0].strip()
@@ -654,6 +765,37 @@ class OfxParser(object):
                 account.statement = cls_.parseStatement(stmtrs_ofx)
             ret.append(account)
         return ret
+
+    @classmethod
+    def parseBalance(cls_, statement, stmt_ofx, bal_tag_name, bal_attr, bal_date_attr, bal_type_string):
+        bal_tag = stmt_ofx.find(bal_tag_name)
+        if hasattr(bal_tag, "contents"):
+            balamt_tag = bal_tag.find('balamt')
+            dtasof_tag = bal_tag.find('dtasof')
+            if hasattr(balamt_tag, "contents"):
+                try:
+                    setattr(statement, bal_attr, parse_decimal(
+                        balamt_tag.contents[0].strip()))
+                except (IndexError, decimal.InvalidOperation):
+                    ex = sys.exc_info()[1]
+                    statement.warnings.append(
+                        six.u("%s balance amount was empty for %s") % (bal_type_string, stmt_ofx))
+                    if cls_.fail_fast:
+                        raise OfxParserException("Empty %s balance" % bal_type_string)
+            if hasattr(dtasof_tag, "contents"):
+                try:
+                    setattr(statement, bal_date_attr, cls_.parseOfxDateTime(
+                        dtasof_tag.contents[0].strip()))
+                except IndexError:
+                    statement.warnings.append(
+                        six.u("%s balance date was empty for %s") % (bal_type_string, stmt_ofx))
+                    if cls_.fail_fast:
+                        raise
+                except ValueError:
+                    statement.warnings.append(
+                        six.u("%s balance date was not allowed for %s") % (bal_type_string, stmt_ofx))
+                    if cls_.fail_fast:
+                        raise
 
     @classmethod
     def parseStatement(cls_, stmt_ofx):
@@ -710,33 +852,9 @@ class OfxParser(object):
                 if cls_.fail_fast:
                     raise
 
-        ledger_bal_tag = stmt_ofx.find('ledgerbal')
-        if hasattr(ledger_bal_tag, "contents"):
-            balamt_tag = ledger_bal_tag.find('balamt')
-            if hasattr(balamt_tag, "contents"):
-                try:
-                    statement.balance = parse_decimal(
-                        balamt_tag.contents[0].strip())
-                except (IndexError, decimal.InvalidOperation):
-                    ex = sys.exc_info()[1]
-                    statement.warnings.append(
-                        six.u("Ledger balance amount was empty for %s") % stmt_ofx)
-                    if cls_.fail_fast:
-                        raise OfxParserException("Empty ledger balance")
+        cls_.parseBalance(statement, stmt_ofx, 'ledgerbal', 'balance', 'balance_date', 'ledger')
 
-        avail_bal_tag = stmt_ofx.find('availbal')
-        if hasattr(avail_bal_tag, "contents"):
-            balamt_tag = avail_bal_tag.find('balamt')
-            if hasattr(balamt_tag, "contents"):
-                try:
-                    statement.available_balance = parse_decimal(
-                        balamt_tag.contents[0].strip())
-                except (IndexError, decimal.InvalidOperation):
-                    ex = sys.exc_info()[1]
-                    msg = six.u("Available balance amount was empty for %s")
-                    statement.warnings.append(msg % stmt_ofx)
-                    if cls_.fail_fast:
-                        raise OfxParserException("Empty available balance")
+        cls_.parseBalance(statement, stmt_ofx, 'availbal', 'available_balance', 'available_balance_date', 'ledger')
 
         for transaction_ofx in stmt_ofx.findAll('stmttrn'):
             try:
