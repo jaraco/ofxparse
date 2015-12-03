@@ -28,6 +28,11 @@ REQUIRES.extend([
     'six',
 ])
 
+
+needs_pytest = set(['pytest', 'test']).intersection(sys.argv)
+pytest_runner = ['pytest-runner'] if needs_pytest else []
+
+
 setup_params = dict(
     name='ofxparse',
     version=VERSION,
@@ -59,8 +64,11 @@ setup_params = dict(
     install_requires=REQUIRES,
     entry_points="""
     """,
-    test_suite='tests',
-    )
+    setup_requires=pytest_runner,
+    tests_require=[
+        'pytest',
+    ],
+)
 
 if __name__ == '__main__':
     setup(**setup_params)
