@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, os.path.abspath('..'))
 
 import six
+import pytest
 
 from .support import open_file
 from ofxparse import OfxParser, AccountType, Account, Statement, Transaction
@@ -517,6 +518,7 @@ class TestFidelityInvestmentStatement(TestCase):
 
 
 class TestSuncorpBankStatement(TestCase):
+    @pytest.mark.xfail(reason="https://bugs.launchpad.net/beautifulsoup/+bug/1522241")
     def testCDATATransactions(self):
         ofx = OfxParser.parse(open_file('suncorp.ofx'))
         accounts = ofx.accounts
