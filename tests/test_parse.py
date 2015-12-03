@@ -232,7 +232,7 @@ class TestParse(TestCase):
         self.assertEquals('00', ofx.account.branch_id)
         self.assertEquals('CHECKING', ofx.account.account_type)
         self.assertEquals(Decimal('382.34'), ofx.account.statement.balance)
-        self.assertEquals(datetime(2009, 5, 23, 12, 20, 17), 
+        self.assertEquals(datetime(2009, 5, 23, 12, 20, 17),
                           ofx.account.statement.balance_date)
         # Todo: support values in decimal or int form.
         # self.assertEquals('15',
