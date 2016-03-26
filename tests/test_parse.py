@@ -476,6 +476,36 @@ class TestParseTransaction(TestCase):
         transaction = OfxParser.parseTransaction(txn.find('stmttrn'))
         self.assertEquals('700', transaction.checknum)
 
+    def testThatParseTransactionWithCommaAsDecimalPoint(self):
+        input = '''
+<STMTTRN>
+ <TRNTYPE>POS
+ <DTPOSTED>20090401122017.000[-5:EST]
+ <TRNAMT>-1006,60
+ <FITID>0000123456782009040100001
+ <NAME>MCDONALD'S #112
+ <MEMO>POS MERCHANDISE;MCDONALD'S #112
+</STMTTRN>
+'''
+        txn = soup_maker(input)
+        transaction = OfxParser.parseTransaction(txn.find('stmttrn'))
+        self.assertEquals(Decimal('-1006.60'), transaction.amount)
+
+    def testThatParseTransactionWithCommaAsDecimalPointAndDotAsSeparator(self):
+        input = '''
+<STMTTRN>
+ <TRNTYPE>POS
+ <DTPOSTED>20090401122017.000[-5:EST]
+ <TRNAMT>-1.006,60
+ <FITID>0000123456782009040100001
+ <NAME>MCDONALD'S #112
+ <MEMO>POS MERCHANDISE;MCDONALD'S #112
+</STMTTRN>
+'''
+        txn = soup_maker(input)
+        with self.assertRaises(OfxParserException):
+            transaction = OfxParser.parseTransaction(txn.find('stmttrn'))
+
 class TestTransaction(TestCase):
     def testThatAnEmptyTransactionIsValid(self):
         t = Transaction()
@@ -548,6 +578,50 @@ class TestFidelityInvestmentStatement(TestCase):
     def testSecurityListSuccess(self):
         ofx = OfxParser.parse(open_file('fidelity.ofx'))
         self.assertEquals(len(ofx.security_list), 7)
+
+
+class Test401InvestmentStatement(TestCase):
+    def testTransferAggregate(self):
+        ofx = OfxParser.parse(open_file('investment_401k.ofx'))
+        expected_txns = [{'id': '1',
+                          'type': 'buymf',
+                          'units': Decimal('8.846699'),
+                          'unit_price': Decimal('22.2908'),
+                          'total': Decimal('-197.2'),
+                          'security': 'FOO'},
+                         {'id': '2',
+                          'type': 'transfer',
+                          'units': Decimal('6.800992'),
+                          'unit_price': Decimal('29.214856'),
+                          'total': Decimal('0.0'),
+                          'security': 'BAR'},
+                         {'id': '3',
+                          'type': 'transfer',
+                          'units': Decimal('-9.060702'),
+                          'unit_price': Decimal('21.928764'),
+                          'total': Decimal('0.0'),
+                          'security': 'BAZ'}]
+        for txn, expected_txn in zip(ofx.account.statement.transactions, expected_txns):
+            self.assertEquals(txn.id, expected_txn['id'])
+            self.assertEquals(txn.type, expected_txn['type'])
+            self.assertEquals(txn.units, expected_txn['units'])
+            self.assertEquals(txn.unit_price, expected_txn['unit_price'])
+            self.assertEquals(txn.total, expected_txn['total'])
+            self.assertEquals(txn.security, expected_txn['security'])
+
+        expected_positions = [{'security': 'FOO',
+                               'units': Decimal('17.604312'),
+                               'unit_price': Decimal('22.517211')},
+                              {'security': 'BAR',
+                               'units': Decimal('13.550983'),
+                               'unit_price': Decimal('29.214855')},
+                              {'security': 'BAZ',
+                               'units': Decimal('0.0'),
+                               'unit_price': Decimal('0.0')}]
+        for pos, expected_pos in zip(ofx.account.statement.positions, expected_positions):
+            self.assertEquals(pos.security, expected_pos['security'])
+            self.assertEquals(pos.units, expected_pos['units'])
+            self.assertEquals(pos.unit_price, expected_pos['unit_price'])
 
 
 class TestSuncorpBankStatement(TestCase):
